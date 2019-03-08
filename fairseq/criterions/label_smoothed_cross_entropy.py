@@ -6,21 +6,24 @@
 # can be found in the PATENTS file in the same directory.
 
 import math
+import torch
 
 from fairseq import utils
 
 from . import FairseqCriterion, register_criterion
 
 
+def roll_1(x, n):
+    return torch.cat((x[:, -n:], x[:, :-n]), dim=1)
+
+
 # https://arxiv.org/abs/1812.04784
 def compute_sentence_loss(sequence):
     seqlen = sequence.shape[1]
     loss = 0
-    for window_slice in utils.window(range(seqlen), 2):
-        window = (-1. * sequence[:, window_slice]).exp()
-        weight = 1. - window.min(1)[0]
-        loss += weight * ((window[:,0] - window[:,1]) ** 2)
-    return loss.sqrt().sum()
+    sequence = (-1. * sequence).exp()
+    weight = 1. - sequence.min(1)[0]
+    return weight * (((sequence - roll_1(sequence, 1)) ** 2).sqrt()).sum(dim=-1)
 
 
 @register_criterion('label_smoothed_cross_entropy')
