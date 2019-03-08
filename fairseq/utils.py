@@ -11,6 +11,7 @@ import re
 import sys
 import traceback
 from collections import defaultdict, OrderedDict
+from itertools import tee
 
 import torch
 from torch.serialization import default_restore_location
@@ -447,3 +448,11 @@ def import_user_module(args):
             sys.path.insert(0, module_parent)
             importlib.import_module(module_name)
             sys.path.pop(0)
+
+
+def window(iterable, size):
+    iters = tee(iterable, size)
+    for i in range(1, size):
+        for each in iters[i:]:
+            next(each, None)
+    return zip(*iters)

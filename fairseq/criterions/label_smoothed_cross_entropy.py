@@ -12,12 +12,25 @@ from fairseq import utils
 from . import FairseqCriterion, register_criterion
 
 
+# https://arxiv.org/abs/1812.04784
+def compute_sentence_loss(sequence):
+    seqlen = sequence.shape[1]
+    loss = 0
+    for window_slice in utils.window(range(seqlen), 2):
+        window = (-1. * sequence[:, window_slice]).exp()
+        weight = 1. - window.min(1)[0]
+        loss += weight * ((window[:,0] - window[:,1]) ** 2)
+    return loss.sqrt().sum()
+
+
 @register_criterion('label_smoothed_cross_entropy')
 class LabelSmoothedCrossEntropyCriterion(FairseqCriterion):
 
     def __init__(self, args, task):
         super().__init__(args, task)
         self.eps = args.label_smoothing
+        self.sentence_eps = args.sentence_smoothing
+        self.window_size = args.window_size
 
     @staticmethod
     def add_args(parser):
@@ -25,6 +38,10 @@ class LabelSmoothedCrossEntropyCriterion(FairseqCriterion):
         # fmt: off
         parser.add_argument('--label-smoothing', default=0., type=float, metavar='D',
                             help='epsilon for label smoothing, 0 means no label smoothing')
+        parser.add_argument('--sentence-smoothing', default=0.6, type=float, metavar='D',
+                            help='epsilon for sentence smoothing, 0 means no sentence smoothing')
+        parser.add_argument('--window-size', default=4, type=int, metavar='N',
+                            help='window size for sentence smoothing')
         # fmt: on
 
     def forward(self, model, sample, reduce=True):
@@ -54,6 +71,12 @@ class LabelSmoothedCrossEntropyCriterion(FairseqCriterion):
         non_pad_mask = target.ne(self.padding_idx)
         nll_loss = -lprobs.gather(dim=-1, index=target)[non_pad_mask]
         smooth_loss = -lprobs.sum(dim=-1, keepdim=True)[non_pad_mask]
+
+        seqlen = nll_loss.shape[-1]
+        for window_slice in utils.window(range(seqlen), self.window_size):
+            window = nll_loss.unsqueeze(0)[:, window_slice]
+            nll_loss += self.sentence_eps * compute_sentence_loss(window)
+
         if reduce:
             nll_loss = nll_loss.sum()
             smooth_loss = smooth_loss.sum()
